@@ -20,6 +20,6 @@ adduser $USERNAME dialout
 echo "$USERNAME:$PASSWORD" | chpasswd
 
 # Make sure to create user directories
-DEBIAN_FRONTEND=noninteractive apt-get install xdg-user-dirs
+#DEBIAN_FRONTEND=noninteractive apt-get install xdg-user-dirs
 
-sudo -u droidian xdg-user-dirs-update
+#sudo -u lindroid xdg-user-dirs-update

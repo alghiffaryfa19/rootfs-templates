@@ -1,33 +1,43 @@
 {{- $architecture := or .architecture "arm64" -}}
-{{- $apilevel := or .apilevel "28" -}}
 {{- $suite := "trixie" -}}
 {{- $use_internal_repository := or .use_internal_repository "no" -}}
 
-{{- $username := or .username "droidian" -}}
-{{- $password := or .password "1234" -}}
-{{- $hostname := or .hostname "droidian" -}}
+{{- $username := or .username "lindroid" -}}
+{{- $password := or .password "lindroid" -}}
+{{- $hostname := or .hostname "lindroid" -}}
 
 architecture: {{ $architecture }}
 actions:
 
   - action: recipe
     description: Generate base rootfs
-    recipe: recipes/droidian_base.yaml
+    recipe: recipes/lindroid_base.yaml
     variables:
       architecture: {{ $architecture }}
       suite: {{ $suite }}
       use_internal_repository: {{ $use_internal_repository }}
 
+  - action: run
+    chroot: true
+    description: Add lindroid repo
+    command: echo "deb [trusted=yes] https://repo.lindroid.org/repository/lindroid trixie main" > /etc/apt/sources.list.d/lindroid-production.list
+
   - action: apt
     chroot: true
     description: install packages
     packages:
-      - adaptation-hybris-api{{ $apilevel }}
+      - libhybris
+      - libhybris-test
+      - lindroid-quirks
+      - nano
 
-  - action: run
-    description: Set up android base
+  - action: apt
     chroot: true
-    script: scripts/setup-gsi.sh
+    description: install packages
+    packages:
+      - sudo
+      - adduser
+      - locales
 
   - action: run
     description: Set up default user
@@ -50,17 +60,3 @@ actions:
     description: update repositories
     command: apt update
 {{end}}
-
-{{ if ne $architecture "amd64" }}
-  - action: apt
-    chroot: true
-    description: install android GSI
-    packages:
-      - android-system-gsi-{{ $apilevel }}:arm64
-{{end}}
-
-  - action: apt
-    chroot: true
-    description: install package sideload-tools
-    packages:
-      - package-sideload-tools
