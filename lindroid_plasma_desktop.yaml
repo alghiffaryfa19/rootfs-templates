@@ -26,7 +26,8 @@ actions:
     chroot: true
     description: install kde
     packages:
-      - kde-standard
+      - kde-full
+      - kwin-wayland
       - maliit-keyboard
       - sddm-theme-debian-breeze
       - kwin-wayland
