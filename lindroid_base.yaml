@@ -30,11 +30,7 @@ actions:
       - libhybris-test
       - lindroid-quirks
       - nano
-
-  - action: apt
-    chroot: true
-    description: install packages
-    packages:
+      - strace
       - sudo
       - adduser
       - locales
