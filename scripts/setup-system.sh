@@ -11,3 +11,10 @@ update-locale LANG=en_US.UTF8
 # Fix resolv conf
 rm /etc/resolv.conf
 echo "nameserver 1.1.1.1" > /etc/resolv.conf
+
+# Sddm needs to be in input group
+adduser sddm input
+
+# Add root and _apt to inet
+adduser root inet
+adduser root inet

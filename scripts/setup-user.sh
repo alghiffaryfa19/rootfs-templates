@@ -5,6 +5,8 @@ USERNAME=$1
 PASSWORD=$2
 [ "$PASSWORD" ] || exit 1
 
+addgroup --gid 3003 inet
+
 adduser --gecos $USERNAME --disabled-password --shell /bin/bash $USERNAME
 adduser $USERNAME sudo
 
@@ -16,6 +18,7 @@ adduser $USERNAME bluetooth
 adduser $USERNAME plugdev
 adduser $USERNAME input
 adduser $USERNAME dialout
+adduser $USERNAME inet
 
 echo "$USERNAME:$PASSWORD" | chpasswd
 
