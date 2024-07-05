@@ -35,6 +35,7 @@ actions:
       - kwin-wayland
       - plasma-workspace-wayland
       - firefox-esr
+      - drihybris
 
   - action: apt
     chroot: true

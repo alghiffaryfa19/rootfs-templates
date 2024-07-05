@@ -36,6 +36,7 @@ actions:
       - locales
       - desktop-base
       - evtest
+      - iproute2
 
   - action: run
     description: Set up default user
