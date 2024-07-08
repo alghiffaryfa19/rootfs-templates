@@ -6,6 +6,7 @@ PASSWORD=$2
 [ "$PASSWORD" ] || exit 1
 
 addgroup --gid 3003 inet
+groupadd --gid 1004 android_input
 
 adduser --gecos $USERNAME --disabled-password --shell /bin/bash $USERNAME
 adduser $USERNAME sudo
@@ -19,6 +20,7 @@ adduser $USERNAME plugdev
 adduser $USERNAME input
 adduser $USERNAME dialout
 adduser $USERNAME inet
+adduser $USERNAME android_input
 
 echo "$USERNAME:$PASSWORD" | chpasswd
 

@@ -14,7 +14,11 @@ echo "nameserver 1.1.1.1" > /etc/resolv.conf
 
 # Sddm needs to be in input group
 adduser sddm input
+adduser sddm android_input
 
 # Add root and _apt to inet
 adduser root inet
-adduser root inet
+usermod -g inet _apt
+
+# Make lindroid dir for audio socket bund-mount
+mkdir /lindroid

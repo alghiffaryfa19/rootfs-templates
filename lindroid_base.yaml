@@ -37,6 +37,13 @@ actions:
       - desktop-base
       - evtest
       - iproute2
+      - libpipewire-module-lindroid
+      - libcanberra-pulse
+      - pipewire-audio
+      - wireplumber
+      - pipewire-pulse
+      - pipewire-alsa
+      - pipewire-jack
 
   - action: run
     description: Set up default user
