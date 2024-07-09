@@ -32,6 +32,7 @@ actions:
       - nano
       - strace
       - sudo
+      - sddm
       - adduser
       - locales
       - desktop-base

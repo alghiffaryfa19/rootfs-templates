@@ -29,7 +29,6 @@ actions:
       - kde-full
       - kwin-wayland
       - qtwayland5
-      - sddm
       - maliit-keyboard
       - sddm-theme-debian-breeze
       - kwin-wayland
