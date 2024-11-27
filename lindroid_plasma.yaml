@@ -26,7 +26,7 @@ actions:
     chroot: true
     description: install kde
     packages:
-      - kde-full
+      - kde-plasma-desktop
       - kwin-wayland
       - qtwayland5
       - maliit-keyboard
