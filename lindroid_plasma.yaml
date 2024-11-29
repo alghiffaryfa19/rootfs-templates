@@ -27,6 +27,7 @@ actions:
     description: install kde
     packages:
       - kde-plasma-desktop
+      - plasma-widgets-addons
       - kwin-wayland
       - qtwayland5
       - maliit-keyboard
