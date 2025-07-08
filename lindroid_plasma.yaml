@@ -26,6 +26,7 @@ actions:
     chroot: true
     description: install kde
     packages:
+      - libqt6gui6-gles
       - kde-full
       - kwin-wayland
       - qtwayland5
@@ -35,6 +36,8 @@ actions:
       - plasma-workspace
       - firefox-esr
       - drihybris
+      - kinfocenter
+      - kscreen
 
   - action: apt
     chroot: true
