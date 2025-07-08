@@ -15,6 +15,7 @@ echo "nameserver 1.1.1.1" > /etc/resolv.conf
 # Sddm needs to be in input group
 adduser sddm input
 adduser sddm android_input
+adduser sddm video
 
 # Add root and _apt to inet
 adduser root inet
