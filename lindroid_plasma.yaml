@@ -27,7 +27,10 @@ actions:
     description: install kde
     packages:
       - libqt6gui6-gles
-      - kde-full
+      - kde-baseapps
+      - kde-standard
+      - kde-inotify-survey
+      - kdeconnect
       - kwin-wayland
       - qtwayland5
       - maliit-keyboard
