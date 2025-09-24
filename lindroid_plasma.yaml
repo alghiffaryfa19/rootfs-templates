@@ -24,21 +24,18 @@ actions:
 
   - action: apt
     chroot: true
-    recommends: true
     description: install kde
     packages:
       - libqt6gui6-gles
-      - kde-baseapps
-      - kde-standard
-      - kde-inotify-survey
-      - kdeconnect
+      - kde-full
       - kwin-wayland
       - qtwayland5
       - maliit-keyboard
       - sddm-theme-debian-breeze
       - kwin-wayland
       - plasma-workspace
-      - firefox-esr
+      - falkon
+      - konsole
       - drihybris
       - kinfocenter
       - kscreen
