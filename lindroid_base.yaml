@@ -19,6 +19,7 @@ actions:
 
   - action: run
     chroot: true
+    recommends: true
     description: Add lindroid repo
     command: echo "deb [trusted=yes] https://repo.lindroid.org/repository/lindroid trixie main" > /etc/apt/sources.list.d/lindroid-production.list
 
