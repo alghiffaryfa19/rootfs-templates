@@ -24,7 +24,6 @@ actions:
 
   - action: apt
     chroot: true
-    recommends: true
     description: install kde
     packages:
       - libqt6gui6-gles
