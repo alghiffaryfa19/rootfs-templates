@@ -9,6 +9,7 @@
 #define CTRL_MSG_PRODUCER_HELLO  2
 #define CTRL_MSG_SCREEN_INFO     7
 #define CTRL_MSG_PICKUP_FDS      9
+#define DATA_MSG_BUF_READY       100
 
 struct ctrl_msg {
     uint32_t type;
@@ -22,6 +23,26 @@ struct screen_info {
     uint32_t format;
     uint32_t refresh;
 } __attribute__((packed));
+
+int recv_fds(int sock, void *data, size_t data_len, int *fds, int fd_count, int *fds_received) {
+    struct iovec iov = { .iov_base = data, .iov_len  = data_len };
+    char cmsg_buf[CMSG_SPACE(sizeof(int) * fd_count)];
+    memset(cmsg_buf, 0, sizeof(cmsg_buf));
+    struct msghdr msg = { .msg_iov = &iov, .msg_iovlen = 1, .msg_control = cmsg_buf, .msg_controllen = sizeof(cmsg_buf) };
+
+    ssize_t n = recvmsg(sock, &msg, 0);
+    if (n <= 0) return -1;
+
+    *fds_received = 0;
+    struct cmsghdr *cmsg = CMSG_FIRSTHDR(&msg);
+    if (cmsg && cmsg->cmsg_level == SOL_SOCKET && cmsg->cmsg_type == SCM_RIGHTS) {
+        int count = (cmsg->cmsg_len - CMSG_LEN(0)) / sizeof(int);
+        if (count > fd_count) count = fd_count;
+        memcpy(fds, CMSG_DATA(cmsg), sizeof(int) * count);
+        *fds_received = count;
+    }
+    return (int)n;
+}
 
 int main(int argc, char **argv) {
     printf("[evdi-bridge] Starting EVDI to Anland bridge...\n");
@@ -69,12 +90,23 @@ int main(int argc, char **argv) {
 
     printf("[evdi-bridge] Handshake sent. Waiting for DMA-BUF FDs from Android...\n");
 
-    // TODO: Implement recvmsg with SCM_RIGHTS to receive the FDs from Android
-    // TODO: Implement libdrm/evdi code to read /dev/dri/card1 and copy to the received DMA-BUFs
-
+    // 3. Receive FDs
+    struct ctrl_msg msg_buf;
+    int fds[8];
+    int fds_received = 0;
     while(1) {
-        sleep(1);
+        int n = recv_fds(client_sock, &msg_buf, sizeof(msg_buf), fds, 8, &fds_received);
+        if (n <= 0) {
+            perror("[evdi-bridge] Client disconnected or error");
+            break;
+        }
+        printf("[evdi-bridge] Received message type: %d, FDs received: %d\n", msg_buf.type, fds_received);
+        for(int i = 0; i < fds_received; i++) {
+            printf("[evdi-bridge] Got DMA-BUF fd: %d\n", fds[i]);
+        }
     }
 
+    close(client_sock);
+    close(sock);
     return 0;
 }
