@@ -32,8 +32,22 @@ int main(int argc, char **argv) {
     addr.sun_family = AF_UNIX;
     strncpy(addr.sun_path, "/tmp/display_daemon.sock", sizeof(addr.sun_path) - 1);
 
-    if (connect(sock, (struct sockaddr*)&addr, sizeof(addr)) < 0) {
-        perror("[evdi-bridge] Failed to connect to /tmp/display_daemon.sock");
+    unlink("/tmp/display_daemon.sock");
+    if (bind(sock, (struct sockaddr*)&addr, sizeof(addr)) < 0) {
+        perror("[evdi-bridge] Failed to bind to /tmp/display_daemon.sock");
+        return 1;
+    }
+    
+    if (listen(sock, 1) < 0) {
+        perror("[evdi-bridge] Failed to listen");
+        return 1;
+    }
+    
+    printf("[evdi-bridge] Listening on /tmp/display_daemon.sock. Waiting for Android app...\n");
+    
+    int client_sock = accept(sock, NULL, NULL);
+    if (client_sock < 0) {
+        perror("[evdi-bridge] Failed to accept");
         return 1;
     }
 
@@ -41,7 +55,7 @@ int main(int argc, char **argv) {
 
     // 1. Send PRODUCER_HELLO
     struct ctrl_msg hello = { .type = CTRL_MSG_PRODUCER_HELLO, .size = 0 };
-    write(sock, &hello, sizeof(hello));
+    write(client_sock, &hello, sizeof(hello));
 
     // 2. Send SCREEN_INFO (Tell Android what resolution EVDI is running at)
     struct {
@@ -51,7 +65,7 @@ int main(int argc, char **argv) {
         .hdr = { .type = CTRL_MSG_SCREEN_INFO, .size = sizeof(struct screen_info) },
         .info = { .width = 1080, .height = 2400, .format = 1, .refresh = 60000 }
     };
-    write(sock, &sinfo, sizeof(sinfo));
+    write(client_sock, &sinfo, sizeof(sinfo));
 
     printf("[evdi-bridge] Handshake sent. Waiting for DMA-BUF FDs from Android...\n");
 
