@@ -27,7 +27,7 @@ actions:
     description: install kde
     packages:
       - libqt6gui6-gles
-      - kde-full
+      - kde-plasma-desktop
       - kwin-wayland
       - qtwayland5
       - maliit-keyboard

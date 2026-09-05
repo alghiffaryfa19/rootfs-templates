@@ -4,6 +4,7 @@
 #include <sys/socket.h>
 #include <sys/un.h>
 #include <sys/uio.h>
+#include <sys/stat.h>
 #include <string.h>
 #include <stdint.h>
 
@@ -60,6 +61,9 @@ int main(int argc, char **argv) {
         perror("[evdi-bridge] Failed to bind to /tmp/display_daemon.sock");
         return 1;
     }
+    
+    // Allow Android app (unprivileged user) to connect to this socket
+    chmod("/tmp/display_daemon.sock", 0777);
     
     if (listen(sock, 1) < 0) {
         perror("[evdi-bridge] Failed to listen");
