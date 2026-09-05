@@ -27,7 +27,6 @@ actions:
     chroot: true
     description: install packages
     packages:
-      - create-disp
       - libgbm-hybris
       - libhybris
       - libhybris-test
