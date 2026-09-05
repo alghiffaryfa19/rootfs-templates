@@ -3,7 +3,9 @@
 #include <unistd.h>
 #include <sys/socket.h>
 #include <sys/un.h>
+#include <sys/uio.h>
 #include <string.h>
+#include <stdint.h>
 
 // Protocol definitions from Anland (display_protocol.h)
 #define CTRL_MSG_PRODUCER_HELLO  2
