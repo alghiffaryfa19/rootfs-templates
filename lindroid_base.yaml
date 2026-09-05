@@ -27,6 +27,9 @@ actions:
     chroot: true
     description: install packages
     packages:
+      - libdrm-dev
+      - build-essential
+      - gcc
       - libgbm-hybris
       - libhybris
       - libhybris-test
@@ -48,6 +51,9 @@ actions:
       - pipewire-alsa
       - pipewire-jack
 
+  - action: overlay
+    source: overlay
+
   - action: run
     description: Set up default user
     chroot: true
@@ -57,6 +63,11 @@ actions:
     description: Set up system
     chroot: true
     script: scripts/setup-system.sh {{ $hostname }}
+
+  - action: run
+    description: Build EVDI Bridge
+    chroot: true
+    script: scripts/build-evdi.sh
 
 {{ if eq $architecture "armhf" }}
   - action: run
