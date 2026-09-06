@@ -177,7 +177,7 @@ int main(int argc, char **argv) {
     // Mmap DMA-BUFs
     uint32_t *mapped_bufs[MAX_BUFS];
     for (int i = 0; i < dma_fds_received; i++) {
-        size_t calc_size = infos[i].stride * infos[i].height * 4;
+        size_t calc_size = infos[i].stride * infos[i].height; // stride is in bytes
         off_t real_size = lseek(dma_fds[i], 0, SEEK_END);
         size_t map_size = (real_size > 0) ? (size_t)real_size : calc_size;
         
@@ -196,53 +196,28 @@ int main(int argc, char **argv) {
     uint8_t color_r = 0, color_g = 120, color_b = 255;
     
     while (1) {
-        // We will just cycle through the buffers
-        for (int i = 0; i < dma_fds_received; i++) {
-            // Draw a solid color
-            uint32_t *pixels = mapped_bufs[i];
-            size_t num_pixels = infos[i].stride * infos[i].height;
-            
-            // Format is likely RGBA8888 or BGRA8888. Let's write a color.
-            uint32_t color = (255 << 24) | (color_b << 16) | (color_g << 8) | color_r;
-            for (size_t p = 0; p < num_pixels; p++) {
-                pixels[p] = color;
-            }
-            
-            // Animate color slightly
-            color_r += 5;
-            color_g += 2;
-            color_b -= 3;
-            
-            // Tell Android this buffer is ready
-            // According to Android code, it polls `buf_ready_efd` after checking `shm_ptr`?
-            // Actually, Android waits for fence_fd.
-            
-            // Wait, does Android consumer expect us to write to fence_fd to say "frame is ready"?
-            // Yes! `refresh_done` waits on `fence_fd`.
-            
-            // In Android side (display_consumer.c):
-            // `select_dmabuf` writes to `buf_ready_efd` and sets `*shm_ptr = idx`.
-            // Wait, if Android does `select_dmabuf`, Android TELLS US which buffer to draw to!
-            
-            // Let's poll on `buf_ready_efd` to wait for Android to give us a buffer!
-            uint64_t efd_val;
-            if (read(efd, &efd_val, sizeof(efd_val)) > 0) {
-                uint32_t selected_idx = *shm_ptr;
-                if (selected_idx < dma_fds_received) {
-                    // Fill the selected buffer
-                    uint32_t *p = mapped_bufs[selected_idx];
-                    uint32_t c = (255 << 24) | ((color_b & 0xFF) << 16) | ((color_g & 0xFF) << 8) | (color_r & 0xFF);
-                    for (size_t pxl = 0; pxl < infos[selected_idx].stride * infos[selected_idx].height; pxl++) {
-                        p[pxl] = c;
+        // Let's poll on `buf_ready_efd` to wait for Android to give us a buffer!
+        uint64_t efd_val;
+        if (read(efd, &efd_val, sizeof(efd_val)) > 0) {
+            uint32_t selected_idx = *shm_ptr;
+            if (selected_idx < dma_fds_received) {
+                uint8_t *p = (uint8_t *)mapped_bufs[selected_idx];
+                uint32_t c = (255 << 24) | ((color_b & 0xFF) << 16) | ((color_g & 0xFF) << 8) | (color_r & 0xFF);
+                
+                for (size_t y = 0; y < infos[selected_idx].height; y++) {
+                    uint32_t *row = (uint32_t *)(p + (y * infos[selected_idx].stride));
+                    for (size_t x = 0; x < infos[selected_idx].width; x++) {
+                        row[x] = c;
                     }
-                    color_r += 5; color_g += 2; color_b -= 3;
-                    
-                    // Signal frame is done by sending a byte over fence_fd
-                    char dummy = 1;
-                    struct iovec iov = { .iov_base = &dummy, .iov_len = 1 };
-                    struct msghdr fmsg = { .msg_iov = &iov, .msg_iovlen = 1 };
-                    sendmsg(fence_fd, &fmsg, 0);
                 }
+                
+                color_r += 5; color_g += 2; color_b -= 3;
+                
+                // Signal frame is done by sending a byte over fence_fd
+                char dummy = 1;
+                struct iovec iov = { .iov_base = &dummy, .iov_len = 1 };
+                struct msghdr fmsg = { .msg_iov = &iov, .msg_iovlen = 1, .msg_control = NULL, .msg_controllen = 0 };
+                sendmsg(fence_fd, &fmsg, 0);
             }
         }
     }
