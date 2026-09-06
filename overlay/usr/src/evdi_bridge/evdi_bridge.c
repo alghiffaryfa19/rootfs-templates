@@ -9,6 +9,8 @@
 #include <string.h>
 #include <stdint.h>
 #include <poll.h>
+#include <fcntl.h>
+#include <unistd.h>
 #include <xf86drm.h>
 #include <xf86drmMode.h>
 #include <evdi_lib.h>
@@ -304,7 +306,7 @@ int main(int argc, char **argv) {
                 
                 // Beritahu Android bahwa kita (sudah mencoba) mengisi frame
                 uint64_t val = 1;
-                write(infos[selected_idx].fence_fd, &val, sizeof(val));
+                write(fence_fd, &val, sizeof(val));
             }
         }
     }
