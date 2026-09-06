@@ -291,6 +291,20 @@ int main(int argc, char **argv) {
     }
 
     if (evdi == EVDI_INVALID_HANDLE) {
+        printf("[evdi-bridge] EVDI device not found. Attempting to add one...\n");
+        if (evdi_add_device() > 0) {
+            sleep(1); // Wait for udev to create the device node
+            for (int i = 0; i < 10; i++) {
+                evdi = evdi_open(i);
+                if (evdi != EVDI_INVALID_HANDLE) {
+                    evdi_idx = i;
+                    break;
+                }
+            }
+        }
+    }
+
+    if (evdi == EVDI_INVALID_HANDLE) {
         printf("[evdi-bridge] FATAL: Failed to open EVDI device.\n");
         return 1;
     }
