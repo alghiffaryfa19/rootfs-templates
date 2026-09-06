@@ -21,7 +21,7 @@
 #define DRM_EVDI_POLL 0x04
 #define DRM_EVDI_GET_BUFF_CALLBACK 0x08
 #define DRM_EVDI_DESTROY_BUFF_CALLBACK 0x09
-#define DRM_EVDI_GBM_CREATE_BUFF_CALLBACK 0x0A
+#define DRM_EVDI_GBM_CREATE_BUFF_CALLBACK 0x0D
 
 #define DRM_IOCTL_EVDI_CONNECT DRM_IOWR(DRM_COMMAND_BASE + DRM_EVDI_CONNECT, struct drm_evdi_connect)
 #define DRM_IOCTL_EVDI_POLL DRM_IOWR(DRM_COMMAND_BASE + DRM_EVDI_POLL, struct drm_evdi_poll)
@@ -204,226 +204,201 @@ int main() {
     listen(sock, 1);
     
     printf("[evdi-bridge] Listening on %s. Waiting for Android app...\n", addr.sun_path);
-    int client_sock = accept(sock, NULL, NULL);
-    if (client_sock < 0) return 1;
-    printf("[evdi-bridge] Connected to Android app!\n");
-
-    struct ctrl_msg hello = { .type = CTRL_MSG_PRODUCER_HELLO, .size = 0 };
-    write(client_sock, &hello, sizeof(hello));
-
-    // Wait for CONSUMER_HELLO and FDs
-    struct ctrl_msg msg_buf;
-    int conn_fds[8];
-    int conn_fds_received = 0;
-    if (recv_fds(client_sock, &msg_buf, sizeof(msg_buf), conn_fds, 8, &conn_fds_received) <= 0) {
-        printf("[evdi-bridge] Failed to receive CONSUMER_HELLO\n");
-        return 1;
-    }
-    
-    int efd       = conn_fds[0];
-    fence_fd      = conn_fds[1];
-    int data_fd   = conn_fds[2];
-    int shm_fd    = conn_fds[3];
-
-    printf("[evdi-bridge] Got connection FDs. data_fd=%d, shm_fd=%d, fence_fd=%d\n", data_fd, shm_fd, fence_fd);
-    
-    shm_ptr = mmap(NULL, sizeof(uint32_t), PROT_READ | PROT_WRITE, MAP_SHARED, shm_fd, 0);
-    if (shm_ptr == MAP_FAILED) {
-        perror("[evdi-bridge] Failed to mmap shm");
-        return 1;
-    }
-
-    struct ctrl_msg fds_ready = { .type = CTRL_MSG_FDS_READY, .size = 0 };
-    write(client_sock, &fds_ready, sizeof(fds_ready));
-
-    // Wait for DMA-BUFs on data_fd
-    struct data_msg dmsg;
-    int dma_fds[MAX_BUFS];
-    int dma_fds_received = 0;
-    
-    printf("[evdi-bridge] Waiting for DMA-BUFs on data_fd...\n");
-    if (recv_fds(data_fd, &dmsg, sizeof(dmsg), dma_fds, MAX_BUFS, &dma_fds_received) <= 0) {
-        printf("[evdi-bridge] Failed to receive DMA-BUFs\n");
-        return 1;
-    }
-
-    struct buf_info infos[MAX_BUFS];
-    if (recv_all(data_fd, infos, dmsg.size) < 0) {
-        printf("[evdi-bridge] Failed to read buf_infos\n");
-        return 1;
-    }
-
-    printf("[evdi-bridge] Received %d DMA-BUFs! Real Size: %dx%d (Stride: %d bytes)\n", 
-            dma_fds_received, infos[0].width, infos[0].height, infos[0].stride);
-
-    // Mmap DMA-BUFs
-    uint32_t *mapped_bufs[MAX_BUFS];
-    for (int i = 0; i < dma_fds_received; i++) {
-        size_t calc_size = infos[i].stride * infos[i].height;
-        off_t real_size = lseek(dma_fds[i], 0, SEEK_END);
-        size_t map_size = (real_size > 0) ? (size_t)real_size : calc_size;
-        
-        mapped_bufs[i] = mmap(NULL, map_size, PROT_READ | PROT_WRITE, MAP_SHARED, dma_fds[i], 0);
-        if (mapped_bufs[i] == MAP_FAILED) {
-            perror("[evdi-bridge] Failed to mmap DMA-BUF");
-            return 1;
-        }
-    }
-    
-    // Now send the dynamic SCREEN_INFO back to Android so it matches what we want!
-    // But Android has already created the DMA-BUFs. We'll just echo it back just in case.
-    struct {
-        struct ctrl_msg hdr;
-        struct screen_info info;
-    } __attribute__((packed)) sinfo = {
-        .hdr = { .type = CTRL_MSG_SCREEN_INFO, .size = sizeof(struct screen_info) },
-        .info = { .width = infos[0].width, .height = infos[0].height, .format = 1, .refresh = 60000 }
-    };
-    write(client_sock, &sinfo, sizeof(sinfo));
-
-    // Initialize EVDI
-    evdi_handle evdi = EVDI_INVALID_HANDLE;
-    int evdi_idx = -1;
-    for (int i = 0; i < 10; i++) {
-        evdi = evdi_open(i);
-        if (evdi != EVDI_INVALID_HANDLE) {
-            evdi_idx = i;
-            break;
-        }
-    }
-
-    if (evdi == EVDI_INVALID_HANDLE) {
-        printf("[evdi-bridge] EVDI device not found. Attempting to add one...\n");
-        FILE *f = fopen("/sys/devices/evdi-lindroid/add", "w");
-        if (f) {
-            fwrite("1\n", 1, 2, f);
-            fclose(f);
-            sleep(1); // Wait for udev to create the device node
-            for (int i = 0; i < 10; i++) {
-                evdi = evdi_open(i);
-                if (evdi != EVDI_INVALID_HANDLE) {
-                    evdi_idx = i;
-                    break;
-                }
-            }
-        } else {
-            perror("[evdi-bridge] Failed to write to /sys/devices/evdi-lindroid/add");
-        }
-    }
-
-    if (evdi == EVDI_INVALID_HANDLE) {
-        printf("[evdi-bridge] FATAL: Failed to open EVDI device.\n");
-        return 1;
-    }
-    printf("[evdi-bridge] EVDI device %d opened successfully!\n", evdi_idx);
-
-    int fd = evdi_get_event_ready(evdi);
-
-    // Connect EVDI
-    struct drm_evdi_connect cmd = {
-        .connected = 1,
-        .dev_index = 0, // card1 usually has dev_index 0 in evdi context, or it ignores it
-        .width = infos[0].width,
-        .height = infos[0].height,
-        .refresh_rate = 60,
-        .display_id = 1
-    };
-    if (drm_ioctl(fd, DRM_IOCTL_EVDI_CONNECT, &cmd) < 0) {
-        perror("[evdi-bridge] EVDI_CONNECT failed");
-        return 1;
-    }
-    printf("[evdi-bridge] Connected display 3048x1906\n");
-
-    printf("[evdi-bridge] Bridge loop started. Waiting for EVDI_POLL events...\n");
-
-    int buffer_assignment_index = 0;
-
-    struct pollfd pfds[2];
-    pfds[0].fd = efd;       // Android efd
-    pfds[0].events = POLLIN;
-    pfds[1].fd = fd;        // DRM fd
-    pfds[1].events = POLLIN;
 
     while (1) {
-        struct drm_evdi_poll poll_cmd = {};
-        uint8_t poll_payload[32] = {0};
-        poll_cmd.data = poll_payload;
+        int client_sock = accept(sock, NULL, NULL);
+        if (client_sock < 0) {
+            perror("[evdi-bridge] accept failed");
+            continue;
+        }
+        printf("[evdi-bridge] Connected to Android app!\n");
 
-        int ret = drm_ioctl(fd, DRM_IOCTL_EVDI_POLL, &poll_cmd);
-        if (ret < 0) {
-            if (errno == EINTR || errno == EAGAIN) {
-                continue; // retry
-            }
-            perror("[evdi-bridge] EVDI_POLL error");
-            break;
+        struct ctrl_msg hello = { .type = CTRL_MSG_PRODUCER_HELLO, .size = 0 };
+        write(client_sock, &hello, sizeof(hello));
+
+        // Wait for CONSUMER_HELLO and FDs
+        struct ctrl_msg msg_buf;
+        int conn_fds[8];
+        int conn_fds_received = 0;
+        if (recv_fds(client_sock, &msg_buf, sizeof(msg_buf), conn_fds, 8, &conn_fds_received) <= 0) {
+            printf("[evdi-bridge] Failed to receive CONSUMER_HELLO\n");
+            close(client_sock);
+            continue;
         }
 
-        if (poll_cmd.event == create_buf) {
-            struct drm_evdi_gbm_create_buff params;
-            memcpy(&params, poll_payload, sizeof(params));
+
+        int efd       = conn_fds[0];
+        fence_fd      = conn_fds[1];
+        int data_fd   = conn_fds[2];
+        int shm_fd    = conn_fds[3];
+
+        printf("[evdi-bridge] Got connection FDs. data_fd=%d, shm_fd=%d, fence_fd=%d\n", data_fd, shm_fd, fence_fd);
+        
+        shm_ptr = mmap(NULL, sizeof(uint32_t), PROT_READ | PROT_WRITE, MAP_SHARED, shm_fd, 0);
+        if (shm_ptr == MAP_FAILED) {
+            perror("[evdi-bridge] Failed to mmap shm");
+            close(client_sock); close(data_fd); close(shm_fd); close(fence_fd);
+            continue;
+        }
+
+        struct ctrl_msg fds_ready = { .type = CTRL_MSG_FDS_READY, .size = 0 };
+        write(client_sock, &fds_ready, sizeof(fds_ready));
+
+        struct data_msg dmsg;
+        int dma_fds[MAX_BUFS];
+        int dma_fds_received = 0;
+        
+        printf("[evdi-bridge] Waiting for DMA-BUFs on data_fd...\n");
+        if (recv(data_fd, &msg_buf, sizeof(msg_buf), MSG_WAITALL) <= 0) {
+            printf("[evdi-bridge] Failed to receive DMA-BUFs\n");
+            close(client_sock); close(data_fd); close(shm_fd); close(fence_fd);
+            continue;
+        }
+
+        struct buf_info infos[MAX_BUFS];
+        if (recv_all(data_fd, infos, dmsg.size) < 0) {
+            printf("[evdi-bridge] Failed to read buf_infos\n");
+            close(client_sock); close(data_fd); close(shm_fd); close(fence_fd);
+            continue;
+        }
+
+        printf("[evdi-bridge] Received %d DMA-BUFs! Real Size: %dx%d (Stride: %d bytes)\n", 
+                dma_fds_received, infos[0].width, infos[0].height, infos[0].stride);
+
+        uint32_t *mapped_bufs[MAX_BUFS];
+        for (int i = 0; i < dma_fds_received; i++) {
+            size_t calc_size = infos[i].stride * infos[i].height;
+            off_t real_size = lseek(dma_fds[i], 0, SEEK_END);
+            size_t map_size = (real_size > 0) ? (size_t)real_size : calc_size;
             
-            // Assign one of our Android DMA-BUFs (round-robin or just pick 0 for now)
-            int assigned_id = buffer_assignment_index % dma_fds_received;
-            buffer_assignment_index++;
-            
-            struct drm_evdi_create_buff_callabck cb = {
-                .poll_id = poll_cmd.poll_id,
-                .id = assigned_id,
-                .stride = infos[assigned_id].stride
-            };
-            
-            printf("[evdi-bridge] EVDI asks to create_buf. Assigning Android buffer ID %d\n", cb.id);
-            if (drm_ioctl(fd, DRM_IOCTL_EVDI_GBM_CREATE_BUFF_CALLBACK, &cb) < 0) {
-                perror("[evdi-bridge] GBM_CREATE_BUFF_CALLBACK failed");
-            }
-            
-        } else if (poll_cmd.event == get_buf) {
-            int requested_id;
-            memcpy(&requested_id, poll_payload, sizeof(requested_id));
-            
-            // Give the kernel the actual DMA-BUF FD!
-            int fd_ints[1] = { dma_fds[requested_id] };
-            
-            struct drm_evdi_get_buff_callabck cb = {
-                .poll_id = poll_cmd.poll_id,
-                .version = 1,
-                .numFds = 1,
-                .numInts = 0,
-                .fd_ints = fd_ints,
-                .data_ints = NULL
-            };
-            
-            printf("[evdi-bridge] EVDI asks for get_buf ID %d. Sending FD %d\n", requested_id, fd_ints[0]);
-            if (drm_ioctl(fd, DRM_IOCTL_EVDI_GET_BUFF_CALLBACK, &cb) < 0) {
-                perror("[evdi-bridge] GET_BUFF_CALLBACK failed");
-            }
-            
-        } else if (poll_cmd.event == destroy_buf) {
-            // Nothing to do for destroy, just ack
-            struct drm_evdi_destroy_buff_callback cb = { .poll_id = poll_cmd.poll_id };
-            printf("[evdi-bridge] EVDI asks to destroy_buf\n");
-            drm_ioctl(fd, DRM_IOCTL_EVDI_DESTROY_BUFF_CALLBACK, &cb);
-            
-        } else if (poll_cmd.event == swap_to) {
-            int swap_id;
-            memcpy(&swap_id, poll_payload, sizeof(swap_id));
-            // printf("[evdi-bridge] EVDI swap_to buffer %d\n", swap_id);
-            
-            // Tell Android the buffer is ready!
-            uint64_t val = 1;
-            write(fence_fd, &val, sizeof(val));
-            
-            // Consume Android's ready signal if available
-            struct pollfd p = { .fd = efd, .events = POLLIN };
-            if (poll(&p, 1, 0) > 0 && (p.revents & POLLIN)) {
-                uint64_t efd_val;
-                read(efd, &efd_val, sizeof(efd_val));
+            mapped_bufs[i] = mmap(NULL, map_size, PROT_READ | PROT_WRITE, MAP_SHARED, dma_fds[i], 0);
+            if (mapped_bufs[i] == MAP_FAILED) {
+                perror("[evdi-bridge] Failed to mmap DMA-BUF");
+                return 1;
             }
         }
+        
+        struct {
+            struct ctrl_msg hdr;
+            struct screen_info info;
+        } __attribute__((packed)) sinfo = {
+            .hdr = { .type = CTRL_MSG_SCREEN_INFO, .size = sizeof(struct screen_info) },
+            .info = { .width = infos[0].width, .height = infos[0].height, .format = 1, .refresh = 60000 }
+        };
+        write(client_sock, &sinfo, sizeof(sinfo));
+
+        evdi_handle evdi = EVDI_INVALID_HANDLE;
+        int evdi_idx = -1;
+        for (int i = 0; i < 10; i++) {
+            evdi = evdi_open(i);
+            if (evdi != EVDI_INVALID_HANDLE) {
+                evdi_idx = i;
+                break;
+            }
+        }
+
+        if (evdi == EVDI_INVALID_HANDLE) {
+            printf("[evdi-bridge] FATAL: Failed to open EVDI device.\n");
+            return 1;
+        }
+        printf("[evdi-bridge] EVDI device %d opened successfully!\n", evdi_idx);
+
+        int evdi_fd = evdi_get_event_ready(evdi);
+
+        struct drm_evdi_connect cmd = {
+            .connected = 1,
+            .dev_index = 0,
+            .width = infos[0].width,
+            .height = infos[0].height,
+            .refresh_rate = 60,
+            .display_id = 0
+        };
+        if (drm_ioctl(evdi_fd, DRM_IOCTL_EVDI_CONNECT, &cmd) < 0) {
+            perror("[evdi-bridge] EVDI_CONNECT failed");
+        }
+        printf("[evdi-bridge] Connected display %dx%d\n", infos[0].width, infos[0].height);
+
+        printf("[evdi-bridge] Bridge loop started. Waiting for EVDI_POLL events...\n");
+
+        int buffer_assignment_index = 0;
+        fd_set rfds;
+        struct timeval tv;
+        int max_fd = (evdi_fd > client_sock) ? evdi_fd : client_sock;
+        bool connected = true;
+
+        while (connected) {
+            FD_ZERO(&rfds);
+            FD_SET(evdi_fd, &rfds);
+            FD_SET(client_sock, &rfds);
+            
+            tv.tv_sec = 1;
+            tv.tv_usec = 0;
+            
+            int ret = select(max_fd + 1, &rfds, NULL, NULL, &tv);
+            if (ret < 0 && errno != EINTR) {
+                perror("[evdi-bridge] select error");
+                break;
+            }
+            
+            if (ret > 0) {
+                if (FD_ISSET(client_sock, &rfds)) {
+                    char dummy;
+                    if (recv(client_sock, &dummy, 1, MSG_PEEK) <= 0) {
+                        printf("[evdi-bridge] Android app disconnected.\n");
+                        connected = false;
+                        break;
+                    }
+                }
+                
+                if (FD_ISSET(evdi_fd, &rfds)) {
+                    struct drm_evdi_poll poll_cmd = {};
+                    uint8_t poll_payload[32] = {0};
+                    poll_cmd.data = poll_payload;
+
+                    if (drm_ioctl(evdi_fd, DRM_IOCTL_EVDI_POLL, &poll_cmd) < 0) {
+                        if (errno != EINTR && errno != EAGAIN) {
+                            perror("[evdi-bridge] EVDI_POLL error");
+                            break;
+                        }
+                    } else {
+                        if (poll_cmd.event == create_buf) {
+                            struct drm_evdi_gbm_create_buff params;
+                            memcpy(&params, poll_payload, sizeof(params));
+                            int assigned_id = buffer_assignment_index % dma_fds_received;
+                            buffer_assignment_index++;
+                            struct drm_evdi_create_buff_callabck cb = {
+                                .poll_id = poll_cmd.poll_id,
+                                .id = assigned_id,
+                                .stride = infos[assigned_id].stride
+                            };
+                            drm_ioctl(evdi_fd, DRM_IOCTL_EVDI_GBM_CREATE_BUFF_CALLBACK, &cb);
+                        } else if (poll_cmd.event == get_buf) {
+                            int requested_id;
+                            memcpy(&requested_id, poll_payload, sizeof(requested_id));
+                            int fd_ints[1] = { dma_fds[requested_id] };
+                            struct drm_evdi_get_buff_callabck cb = {
+                                .poll_id = poll_cmd.poll_id,
+                                .version = 1,
+                                .numFds = 1,
+                                .numInts = 0,
+                                .fd_ints = fd_ints,
+                                .data_ints = NULL
+                            };
+                            drm_ioctl(evdi_fd, DRM_IOCTL_EVDI_GET_BUFF_CALLBACK, &cb);
+                        } else if (poll_cmd.event == destroy_buf) {
+                            struct drm_evdi_destroy_buff_callback cb = { .poll_id = poll_cmd.poll_id };
+                            drm_ioctl(evdi_fd, DRM_IOCTL_EVDI_DESTROY_BUFF_CALLBACK, &cb);
+                        } else if (poll_cmd.event == swap_to) {
+                            char val = 1;
+                            write(fence_fd, &val, 1);
+                        }
+                    }
+                }
+            }
+        }
+        struct drm_evdi_connect dis = {0};
+        drm_ioctl(evdi_fd, DRM_IOCTL_EVDI_CONNECT, &dis);
+        evdi_close(evdi);
     }
-
-    struct drm_evdi_connect dis = {0};
-    drm_ioctl(fd, DRM_IOCTL_EVDI_CONNECT, &dis);
-    evdi_close(evdi);
     return 0;
 }
