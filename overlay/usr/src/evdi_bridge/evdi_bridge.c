@@ -203,12 +203,21 @@ int main(int argc, char **argv) {
     write(client_sock, &sinfo, sizeof(sinfo));
 
     // Initialize EVDI
-    evdi_handle evdi = evdi_open(0);
+    evdi_handle evdi = EVDI_INVALID_HANDLE;
+    int evdi_idx = -1;
+    for (int i = 0; i < 10; i++) {
+        evdi = evdi_open(i);
+        if (evdi != EVDI_INVALID_HANDLE) {
+            evdi_idx = i;
+            break;
+        }
+    }
+    
     if (evdi == EVDI_INVALID_HANDLE) {
-        printf("[evdi-bridge] FATAL: Failed to open EVDI device 0. Is lindroid-drm-evdi loaded?\n");
+        printf("[evdi-bridge] FATAL: Failed to open EVDI device. Is lindroid-drm-evdi loaded?\n");
         return 1;
     }
-    printf("[evdi-bridge] EVDI device 0 opened successfully!\n");
+    printf("[evdi-bridge] EVDI device %d opened successfully!\n", evdi_idx);
 
     unsigned char dummy_edid[128] = {
         0x00, 0xff, 0xff, 0xff, 0xff, 0xff, 0xff, 0x00, 
