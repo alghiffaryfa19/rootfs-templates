@@ -292,16 +292,23 @@ int main(int argc, char **argv) {
                         if (res) {
                             for (int i = 0; i < res->count_crtcs; i++) {
                                 drmModeCrtc *crtc = drmModeGetCrtc(fd, res->crtcs[i]);
-                                if (crtc && crtc->mode_valid) {
-                                    printf("[evdi-bridge] KWayland is using CRTC %d: %dx%d (mode: %s)\n", 
-                                           crtc->crtc_id, crtc->width, crtc->height, crtc->mode.name);
+                                if (crtc) {
+                                    printf("[evdi-bridge] KWayland is using CRTC %d: %dx%d (mode_valid: %d, name: %s)\n", 
+                                           crtc->crtc_id, crtc->width, crtc->height, crtc->mode_valid, crtc->mode.name);
                                     drmModeFreeCrtc(crtc);
+                                } else {
+                                    printf("[evdi-bridge] Failed to get CRTC %d\n", res->crtcs[i]);
                                 }
                             }
                             drmModeFreeResources(res);
+                        } else {
+                            printf("[evdi-bridge] drmModeGetResources failed\n");
                         }
                         close(fd);
+                    } else {
+                        printf("[evdi-bridge] Failed to open /dev/dri/card1 for debugging\n");
                     }
+                    fflush(stdout);
                 }
                 
                 // Beritahu Android bahwa kita (sudah mencoba) mengisi frame
