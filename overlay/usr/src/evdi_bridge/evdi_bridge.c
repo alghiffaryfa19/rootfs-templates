@@ -289,11 +289,13 @@ int main(int argc, char **argv) {
             uint64_t efd_val;
             if (read(efd, &efd_val, sizeof(efd_val)) > 0) {
                 uint32_t selected_idx = *shm_ptr;
-                if (selected_idx < dma_fds_received) {
-                    if (!evdi_request_update(evdi, selected_idx)) {
-                        update_ready_handler(selected_idx, NULL);
-                    }
-                }
+                // Kernel minta update. Kasih frame terbaru.
+                // Lindroid EVDI tidak mendukung request_update (mereturn EINVAL).
+                // Kita langsung grab_pixels saja seperti create-disp.
+                // if (!evdi_request_update(evdi, selected_idx)) {
+                //     update_ready_handler(selected_idx, NULL);
+                // }
+                evdi_grab_pixels(evdi, NULL, NULL);
             }
         }
     }
