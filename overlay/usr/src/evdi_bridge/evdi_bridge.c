@@ -294,7 +294,10 @@ int main() {
 
     if (evdi == EVDI_INVALID_HANDLE) {
         printf("[evdi-bridge] EVDI device not found. Attempting to add one...\n");
-        if (evdi_add_device() > 0) {
+        FILE *f = fopen("/sys/devices/evdi-lindroid/add", "w");
+        if (f) {
+            fwrite("1\n", 1, 2, f);
+            fclose(f);
             sleep(1); // Wait for udev to create the device node
             for (int i = 0; i < 10; i++) {
                 evdi = evdi_open(i);
@@ -303,6 +306,8 @@ int main() {
                     break;
                 }
             }
+        } else {
+            perror("[evdi-bridge] Failed to write to /sys/devices/evdi-lindroid/add");
         }
     }
 
