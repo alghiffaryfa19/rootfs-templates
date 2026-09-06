@@ -9,6 +9,8 @@
 #include <string.h>
 #include <stdint.h>
 #include <poll.h>
+#include <xf86drm.h>
+#include <xf86drmMode.h>
 #include <evdi_lib.h>
 
 #define CTRL_MSG_CONSUMER_HELLO  1
@@ -279,6 +281,30 @@ int main(int argc, char **argv) {
                 struct evdi_rect r[16];
                 int n_rects = 16;
                 evdi_grab_pixels(evdi, r, &n_rects);
+                
+                if (n_rects == 0) { // grabpix failed
+                    // Let's find out what the actual DRM resolution is!
+                    int fd = open("/dev/dri/card1", O_RDWR);
+                    if (fd >= 0) {
+                        drmModeRes *res = drmModeGetResources(fd);
+                        if (res) {
+                            for (int i = 0; i < res->count_crtcs; i++) {
+                                drmModeCrtc *crtc = drmModeGetCrtc(fd, res->crtcs[i]);
+                                if (crtc && crtc->mode_valid) {
+                                    printf("[evdi-bridge] KWayland is using CRTC %d: %dx%d (mode: %s)\n", 
+                                           crtc->crtc_id, crtc->width, crtc->height, crtc->mode.name);
+                                    drmModeFreeCrtc(crtc);
+                                }
+                            }
+                            drmModeFreeResources(res);
+                        }
+                        close(fd);
+                    }
+                }
+                
+                // Beritahu Android bahwa kita (sudah mencoba) mengisi frame
+                uint64_t val = 1;
+                write(infos[selected_idx].fence_fd, &val, sizeof(val));
             }
         }
     }
