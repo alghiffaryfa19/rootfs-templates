@@ -14,6 +14,62 @@
 #include <xf86drm.h>
 #include <xf86drmMode.h>
 #include <evdi_lib.h>
+#include <sys/ioctl.h>
+#include <errno.h>
+
+#define DRM_EVDI_POLL 0x04
+#define DRM_EVDI_GET_BUFF_CALLBACK 0x08
+#define DRM_EVDI_GBM_CREATE_BUFF_CALLBACK 0x0A
+
+#define DRM_IOCTL_EVDI_POLL DRM_IOWR(DRM_COMMAND_BASE + DRM_EVDI_POLL, struct drm_evdi_poll)
+#define DRM_IOCTL_EVDI_GET_BUFF_CALLBACK DRM_IOWR(DRM_COMMAND_BASE + DRM_EVDI_GET_BUFF_CALLBACK, struct drm_evdi_get_buff_callabck)
+#define DRM_IOCTL_EVDI_GBM_CREATE_BUFF_CALLBACK DRM_IOWR(DRM_COMMAND_BASE + DRM_EVDI_GBM_CREATE_BUFF_CALLBACK, struct drm_evdi_create_buff_callabck)
+
+enum poll_event_type {
+    none,
+    add_buf,
+    get_buf,
+    destroy_buf,
+    swap_to,
+    create_buf
+};
+
+struct drm_evdi_poll {
+    enum poll_event_type event;
+    int poll_id;
+    void *data;
+};
+
+struct drm_evdi_gbm_create_buff {
+    int *id;
+    uint32_t *stride;
+    uint32_t format;
+    uint32_t width;
+    uint32_t height;
+};
+
+struct drm_evdi_create_buff_callabck {
+    int poll_id;
+    int id;
+    uint32_t stride;
+};
+
+struct drm_evdi_get_buff_callabck {
+    int poll_id;
+    int version;
+    int numFds;
+    int numInts;
+    int *fd_ints;
+    int *data_ints;
+};
+
+int drm_ioctl(int fd, unsigned long req, void *arg) {
+    int ret;
+    do {
+        ret = ioctl(fd, req, arg);
+    } while (ret == -1 && (errno == EINTR || errno == EAGAIN));
+    return ret;
+}
 
 #define CTRL_MSG_CONSUMER_HELLO  1
 #define CTRL_MSG_PRODUCER_HELLO  2
@@ -207,118 +263,118 @@ int main(int argc, char **argv) {
     write(client_sock, &sinfo, sizeof(sinfo));
 
     // Initialize EVDI
-    evdi_handle evdi = EVDI_INVALID_HANDLE;
-    int evdi_idx = -1;
-    for (int i = 0; i < 10; i++) {
-        evdi = evdi_open(i);
-        if (evdi != EVDI_INVALID_HANDLE) {
-            evdi_idx = i;
-            break;
-        }
-    }
-    
-    if (evdi == EVDI_INVALID_HANDLE) {
-        printf("[evdi-bridge] FATAL: Failed to open EVDI device. Is lindroid-drm-evdi loaded?\n");
+    int fd = open("/dev/dri/card1", O_RDWR);
+    if (fd < 0) {
+        printf("[evdi-bridge] FATAL: Failed to open EVDI device.\n");
         return 1;
     }
-    printf("[evdi-bridge] EVDI device %d opened successfully!\n", evdi_idx);
+    printf("[evdi-bridge] EVDI device opened successfully!\n");
 
-    // Connect EVDI (using Lindroid parameters)
-    evdi_connect(evdi, infos[0].width, infos[0].height, 60, 1);
-
-    // Register our DMA-BUFs as EVDI buffers
-    struct evdi_rect rects[16];
-    for (int i = 0; i < dma_fds_received; i++) {
-        struct evdi_buffer ev_buf;
-        ev_buf.id = i;
-        ev_buf.buffer = mapped_bufs[i];
-        ev_buf.width = infos[i].width;
-        ev_buf.height = infos[i].height;
-        ev_buf.stride = infos[i].stride;
-        ev_buf.rects = rects;
-        ev_buf.rect_count = 16;
-        
-        evdi_register_buffer(evdi, ev_buf);
-        printf("[evdi-bridge] Registered EVDI buffer %d (%dx%d stride %d)\n", i, ev_buf.width, ev_buf.height, ev_buf.stride);
-    }
-
-    struct evdi_event_context evtctx = {
-        .dpms_handler = dpms_handler,
-        .mode_changed_handler = mode_changed_handler,
-        .update_ready_handler = update_ready_handler,
-        .crtc_state_handler = crtc_state_handler,
-        .user_data = NULL
+    // Connect EVDI
+    struct drm_evdi_connect cmd = {
+        .connected = 1,
+        .dev_index = 0, // card1 usually has dev_index 0 in evdi context, or it ignores it
+        .width = infos[0].width,
+        .height = infos[0].height,
+        .refresh_rate = 60,
+        .display_id = 1
     };
+    if (drm_ioctl(fd, DRM_IOCTL_EVDI_CONNECT, &cmd) < 0) {
+        perror("[evdi-bridge] EVDI_CONNECT failed");
+        return 1;
+    }
+    printf("[evdi-bridge] Connected display 3048x1906\n");
 
-    printf("[evdi-bridge] Bridge loop started. Waiting for EVDI/Android events...\n");
+    printf("[evdi-bridge] Bridge loop started. Waiting for EVDI_POLL events...\n");
 
-    int evdi_fd = evdi_get_event_ready(evdi);
-    
+    int buffer_assignment_index = 0;
+
     struct pollfd pfds[2];
-    pfds[0].fd = efd;       // Android tells us which buffer is free
+    pfds[0].fd = efd;       // Android efd
     pfds[0].events = POLLIN;
-    pfds[1].fd = evdi_fd;   // EVDI tells us when frame is ready
+    pfds[1].fd = fd;        // DRM fd
     pfds[1].events = POLLIN;
 
     while (1) {
-        if (poll(pfds, 2, -1) < 0) {
-            perror("[evdi-bridge] Poll error");
+        struct drm_evdi_poll poll_cmd = {};
+        uint8_t poll_payload[32] = {0};
+        poll_cmd.data = poll_payload;
+
+        int ret = drm_ioctl(fd, DRM_IOCTL_EVDI_POLL, &poll_cmd);
+        if (ret < 0) {
+            if (errno == EINTR || errno == EAGAIN) {
+                continue; // retry
+            }
+            perror("[evdi-bridge] EVDI_POLL error");
             break;
         }
 
-        if (pfds[1].revents & POLLIN) {
-            evdi_handle_events(evdi, &evtctx);
-        }
-
-        if (pfds[0].revents & POLLIN) {
-            uint64_t efd_val;
-            if (read(efd, &efd_val, sizeof(efd_val)) > 0) {
-                uint32_t selected_idx = *shm_ptr;
-                // Kernel minta update. Kasih frame terbaru.
-                // Lindroid EVDI tidak mendukung request_update (mereturn EINVAL).
-                // Kita langsung grab_pixels saja seperti create-disp.
-                // if (!evdi_request_update(evdi, selected_idx)) {
-                //     update_ready_handler(selected_idx, NULL);
-                // }
-                struct evdi_rect r[16];
-                int n_rects = 16;
-                evdi_grab_pixels(evdi, r, &n_rects);
-                
-                if (n_rects == 0) { // grabpix failed
-                    // Let's find out what the actual DRM resolution is!
-                    int fd = open("/dev/dri/card1", O_RDWR);
-                    if (fd >= 0) {
-                        drmModeRes *res = drmModeGetResources(fd);
-                        if (res) {
-                            for (int i = 0; i < res->count_crtcs; i++) {
-                                drmModeCrtc *crtc = drmModeGetCrtc(fd, res->crtcs[i]);
-                                if (crtc) {
-                                    printf("[evdi-bridge] KWayland is using CRTC %d: %dx%d (mode_valid: %d, name: %s)\n", 
-                                           crtc->crtc_id, crtc->width, crtc->height, crtc->mode_valid, crtc->mode.name);
-                                    drmModeFreeCrtc(crtc);
-                                } else {
-                                    printf("[evdi-bridge] Failed to get CRTC %d\n", res->crtcs[i]);
-                                }
-                            }
-                            drmModeFreeResources(res);
-                        } else {
-                            printf("[evdi-bridge] drmModeGetResources failed\n");
-                        }
-                        close(fd);
-                    } else {
-                        printf("[evdi-bridge] Failed to open /dev/dri/card1 for debugging\n");
-                    }
-                    fflush(stdout);
-                }
-                
-                // Beritahu Android bahwa kita (sudah mencoba) mengisi frame
-                uint64_t val = 1;
-                write(fence_fd, &val, sizeof(val));
+        if (poll_cmd.event == create_buf) {
+            struct drm_evdi_gbm_create_buff params;
+            memcpy(&params, poll_payload, sizeof(params));
+            
+            // Assign one of our Android DMA-BUFs (round-robin or just pick 0 for now)
+            int assigned_id = buffer_assignment_index % dma_fds_received;
+            buffer_assignment_index++;
+            
+            struct drm_evdi_create_buff_callabck cb = {
+                .poll_id = poll_cmd.poll_id,
+                .id = assigned_id,
+                .stride = infos[assigned_id].stride
+            };
+            
+            printf("[evdi-bridge] EVDI asks to create_buf. Assigning Android buffer ID %d\n", cb.id);
+            if (drm_ioctl(fd, DRM_IOCTL_EVDI_GBM_CREATE_BUFF_CALLBACK, &cb) < 0) {
+                perror("[evdi-bridge] GBM_CREATE_BUFF_CALLBACK failed");
+            }
+            
+        } else if (poll_cmd.event == get_buf) {
+            int requested_id;
+            memcpy(&requested_id, poll_payload, sizeof(requested_id));
+            
+            // Give the kernel the actual DMA-BUF FD!
+            int fd_ints[1] = { dma_fds[requested_id] };
+            
+            struct drm_evdi_get_buff_callabck cb = {
+                .poll_id = poll_cmd.poll_id,
+                .version = 1,
+                .numFds = 1,
+                .numInts = 0,
+                .fd_ints = fd_ints,
+                .data_ints = NULL
+            };
+            
+            printf("[evdi-bridge] EVDI asks for get_buf ID %d. Sending FD %d\n", requested_id, fd_ints[0]);
+            if (drm_ioctl(fd, DRM_IOCTL_EVDI_GET_BUFF_CALLBACK, &cb) < 0) {
+                perror("[evdi-bridge] GET_BUFF_CALLBACK failed");
+            }
+            
+        } else if (poll_cmd.event == destroy_buf) {
+            // Nothing to do for destroy, just ack
+            struct drm_evdi_destroy_buff_callback cb = { .poll_id = poll_cmd.poll_id };
+            printf("[evdi-bridge] EVDI asks to destroy_buf\n");
+            drm_ioctl(fd, DRM_IOCTL_EVDI_DESTROY_BUFF_CALLBACK, &cb);
+            
+        } else if (poll_cmd.event == swap_to) {
+            int swap_id;
+            memcpy(&swap_id, poll_payload, sizeof(swap_id));
+            // printf("[evdi-bridge] EVDI swap_to buffer %d\n", swap_id);
+            
+            // Tell Android the buffer is ready!
+            uint64_t val = 1;
+            write(fence_fd, &val, sizeof(val));
+            
+            // Consume Android's ready signal if available
+            struct pollfd p = { .fd = efd, .events = POLLIN };
+            if (poll(&p, 1, 0) > 0 && (p.revents & POLLIN)) {
+                uint64_t efd_val;
+                read(efd, &efd_val, sizeof(efd_val));
             }
         }
     }
 
-    evdi_disconnect(evdi);
-    evdi_close(evdi);
+    struct drm_evdi_connect dis = {0};
+    drm_ioctl(fd, DRM_IOCTL_EVDI_CONNECT, &dis);
+    close(fd);
     return 0;
 }
