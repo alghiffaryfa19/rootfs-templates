@@ -17,12 +17,16 @@
 #include <sys/ioctl.h>
 #include <errno.h>
 
+#define DRM_EVDI_CONNECT 0x00
 #define DRM_EVDI_POLL 0x04
 #define DRM_EVDI_GET_BUFF_CALLBACK 0x08
+#define DRM_EVDI_DESTROY_BUFF_CALLBACK 0x09
 #define DRM_EVDI_GBM_CREATE_BUFF_CALLBACK 0x0A
 
+#define DRM_IOCTL_EVDI_CONNECT DRM_IOWR(DRM_COMMAND_BASE + DRM_EVDI_CONNECT, struct drm_evdi_connect)
 #define DRM_IOCTL_EVDI_POLL DRM_IOWR(DRM_COMMAND_BASE + DRM_EVDI_POLL, struct drm_evdi_poll)
 #define DRM_IOCTL_EVDI_GET_BUFF_CALLBACK DRM_IOWR(DRM_COMMAND_BASE + DRM_EVDI_GET_BUFF_CALLBACK, struct drm_evdi_get_buff_callabck)
+#define DRM_IOCTL_EVDI_DESTROY_BUFF_CALLBACK DRM_IOWR(DRM_COMMAND_BASE + DRM_EVDI_DESTROY_BUFF_CALLBACK, struct drm_evdi_destroy_buff_callback)
 #define DRM_IOCTL_EVDI_GBM_CREATE_BUFF_CALLBACK DRM_IOWR(DRM_COMMAND_BASE + DRM_EVDI_GBM_CREATE_BUFF_CALLBACK, struct drm_evdi_create_buff_callabck)
 
 enum poll_event_type {
@@ -32,6 +36,19 @@ enum poll_event_type {
     destroy_buf,
     swap_to,
     create_buf
+};
+
+struct drm_evdi_connect {
+    int32_t connected;
+    int32_t dev_index;
+    uint32_t width;
+    uint32_t height;
+    uint32_t refresh_rate;
+    uint32_t display_id;
+};
+
+struct drm_evdi_destroy_buff_callback {
+    int poll_id;
 };
 
 struct drm_evdi_poll {
