@@ -266,12 +266,13 @@ int main() {
                 dma_fds_received, infos[0].width, infos[0].height, infos[0].stride);
 
         uint32_t *mapped_bufs[MAX_BUFS];
+        size_t map_sizes[MAX_BUFS];
         for (int i = 0; i < dma_fds_received; i++) {
             size_t calc_size = infos[i].stride * infos[i].height;
             off_t real_size = lseek(dma_fds[i], 0, SEEK_END);
-            size_t map_size = (real_size > 0) ? (size_t)real_size : calc_size;
+            map_sizes[i] = (real_size > 0) ? (size_t)real_size : calc_size;
             
-            mapped_bufs[i] = mmap(NULL, map_size, PROT_READ | PROT_WRITE, MAP_SHARED, dma_fds[i], 0);
+            mapped_bufs[i] = mmap(NULL, map_sizes[i], PROT_READ | PROT_WRITE, MAP_SHARED, dma_fds[i], 0);
             if (mapped_bufs[i] == MAP_FAILED) {
                 perror("[evdi-bridge] Failed to mmap DMA-BUF");
                 return 1;
@@ -399,6 +400,17 @@ int main() {
         struct drm_evdi_connect dis = {0};
         drm_ioctl(evdi_fd, DRM_IOCTL_EVDI_CONNECT, &dis);
         evdi_close(evdi);
+
+        // Cleanup resources before accepting new connection
+        for (int i = 0; i < dma_fds_received; i++) {
+            munmap(mapped_bufs[i], map_sizes[i]);
+            close(dma_fds[i]);
+        }
+        munmap(shm_ptr, sizeof(uint32_t));
+        close(client_sock);
+        close(data_fd);
+        close(shm_fd);
+        close(fence_fd);
     }
     return 0;
 }
