@@ -180,7 +180,9 @@ int recv_all(int fd, void *buf, size_t len) {
     return 0;
 }
 
-int main(int argc, char **argv) {
+int main() {
+    setbuf(stdout, NULL);
+    setbuf(stderr, NULL);
     printf("[evdi-bridge] Starting EVDI bridge...\n");
 
     int sock = socket(AF_UNIX, SOCK_STREAM, 0);
