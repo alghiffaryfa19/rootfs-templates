@@ -177,14 +177,18 @@ int main(int argc, char **argv) {
     // Mmap DMA-BUFs
     uint32_t *mapped_bufs[MAX_BUFS];
     for (int i = 0; i < dma_fds_received; i++) {
-        size_t size = infos[i].stride * infos[i].height * 4; // assuming 4 bytes per pixel
-        mapped_bufs[i] = mmap(NULL, size, PROT_READ | PROT_WRITE, MAP_SHARED, dma_fds[i], 0);
+        size_t calc_size = infos[i].stride * infos[i].height * 4;
+        off_t real_size = lseek(dma_fds[i], 0, SEEK_END);
+        size_t map_size = (real_size > 0) ? (size_t)real_size : calc_size;
+        
+        mapped_bufs[i] = mmap(NULL, map_size, PROT_READ | PROT_WRITE, MAP_SHARED, dma_fds[i], 0);
         if (mapped_bufs[i] == MAP_FAILED) {
-            perror("[evdi-bridge] Failed to mmap DMA-BUF");
+            printf("[evdi-bridge] Failed to mmap DMA-BUF %d (fd=%d, calc_size=%zu, real_size=%ld): ", i, dma_fds[i], calc_size, (long)real_size);
+            perror("");
             return 1;
         }
-        printf("[evdi-bridge] Mapped buffer %d (fd=%d, size=%zu, stride=%d, w=%d, h=%d)\n", 
-            i, dma_fds[i], size, infos[i].stride, infos[i].width, infos[i].height);
+        printf("[evdi-bridge] Mapped buffer %d (fd=%d, map_size=%zu, stride=%d, w=%d, h=%d)\n", 
+            i, dma_fds[i], map_size, infos[i].stride, infos[i].width, infos[i].height);
     }
 
     // 5. Test Render Loop
