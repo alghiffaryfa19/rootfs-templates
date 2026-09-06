@@ -132,8 +132,11 @@ static volatile uint32_t *shm_ptr = NULL;
 
 static void *client_watchdog(void *arg) {
     int client_sock = *(int *)arg;
-    char dummy;
-    recv(client_sock, &dummy, 1, MSG_WAITALL);
+    char dummy[64];
+    while (1) {
+        ssize_t n = recv(client_sock, dummy, sizeof(dummy), 0);
+        if (n <= 0) break;
+    }
     printf("[evdi-bridge] Android app disconnected or connection lost.\n");
     g_connected = 0;
     if (g_evdi_fd >= 0) {
