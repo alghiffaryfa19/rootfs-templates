@@ -1,12 +1,14 @@
 [Unit]
 Description=EVDI to Anland Bridge Service
 After=network.target
+Before=display-manager.service sddm.service
+Wants=display-manager.service
 
 [Service]
 Type=simple
 ExecStart=/usr/bin/evdi_bridge
 Restart=always
-RestartSec=3
+RestartSec=2
 
 [Install]
 WantedBy=multi-user.target
