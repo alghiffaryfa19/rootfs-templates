@@ -197,16 +197,12 @@ int main() {
     struct sockaddr_un addr;
     memset(&addr, 0, sizeof(addr));
     addr.sun_family = AF_UNIX;
-    strncpy(addr.sun_path, "/var/display_daemon.sock", sizeof(addr.sun_path) - 1);
-    unlink("/var/display_daemon.sock");
+    strncpy(addr.sun_path, "/tmp/display_daemon.sock", sizeof(addr.sun_path) - 1);
     unlink("/tmp/display_daemon.sock");
 
     if (bind(sock, (struct sockaddr*)&addr, sizeof(addr)) < 0) {
-        strncpy(addr.sun_path, "/tmp/display_daemon.sock", sizeof(addr.sun_path) - 1);
-        if (bind(sock, (struct sockaddr*)&addr, sizeof(addr)) < 0) {
-            perror("[evdi-bridge] Failed to bind to /var or /tmp display_daemon.sock");
-            return 1;
-        }
+        perror("[evdi-bridge] Failed to bind to /tmp/display_daemon.sock");
+        return 1;
     }
     chmod(addr.sun_path, 0777);
     listen(sock, 1);
