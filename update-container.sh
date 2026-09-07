@@ -28,15 +28,9 @@ chmod +x /usr/bin/create-disp
 cp ../create-disp.service /etc/systemd/system/create-disp.service
 systemctl daemon-reload
 systemctl enable create-disp.service
+systemctl start create-disp.service
 
-# Remove old Anland evdi_bridge if exists
-if [ -f "/etc/systemd/system/evdi_bridge.service" ]; then
-    systemctl disable evdi_bridge.service || true
-    rm -f /etc/systemd/system/evdi_bridge.service
-fi
-if [ -f "/etc/systemd/system/display_daemon.service" ]; then
-    systemctl disable display_daemon.service || true
-    rm -f /etc/systemd/system/display_daemon.service
-fi
+systemctl stop evdi-bridge.service
+systemctl disable evdi-bridge.service
 
 echo "create-disp successfully built and installed!"
