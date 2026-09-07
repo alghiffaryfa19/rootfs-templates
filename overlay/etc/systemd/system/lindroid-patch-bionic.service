@@ -1,0 +1,13 @@
+[Unit]
+Description=Bind mount patched Bionic libraries for Lindroid compatibility
+DefaultDependencies=no
+After=systemd-remount-fs.service
+Before=sysinit.target sddm.service evdi-bridge.service
+
+[Service]
+Type=oneshot
+ExecStart=/bin/sh -c 'mount --bind /usr/lib/lindroid/libdl.so.patched /apex/com.android.runtime/lib64/bionic/libdl.so; [ -f /apex/com.android.runtime@1/lib64/bionic/libdl.so ] && mount --bind /usr/lib/lindroid/libdl.so.patched /apex/com.android.runtime@1/lib64/bionic/libdl.so; true'
+RemainAfterExit=yes
+
+[Install]
+WantedBy=sysinit.target

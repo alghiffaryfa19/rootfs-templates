@@ -398,31 +398,54 @@ int main() {
                 memcpy(&params, poll_payload, sizeof(params));
                 int assigned_id = buffer_assignment_index % dma_fds_received;
                 buffer_assignment_index++;
+                int bo_id = assigned_id + 1; // libgbm-hybris requires id > 0 (id <= 0 is treated as invalid)
+                printf("[evdi-bridge] Event: create_buf (format=0x%x, size=%ux%u) -> assigned bo_id=%d, stride=%u\n",
+                       params.format, params.width, params.height, bo_id, infos[assigned_id].stride);
                 struct drm_evdi_create_buff_callabck cb = {
                     .poll_id = poll_cmd.poll_id,
-                    .id = assigned_id,
+                    .id = bo_id,
                     .stride = infos[assigned_id].stride
                 };
                 drm_ioctl(evdi_fd, DRM_IOCTL_EVDI_GBM_CREATE_BUFF_CALLBACK, &cb);
             } else if (poll_cmd.event == get_buf) {
                 int requested_id = -1;
                 memcpy(&requested_id, poll_payload, sizeof(requested_id));
-                if (requested_id >= 0 && requested_id < dma_fds_received) {
-                    int fd_ints[1] = { dma_fds[requested_id] };
+                int idx = (requested_id > 0) ? (requested_id - 1) : requested_id;
+                printf("[evdi-bridge] Event: get_buf (requested bo_id=%d -> dmabuf idx=%d)\n", requested_id, idx);
+                if (idx >= 0 && idx < dma_fds_received) {
+                    int fd_ints[1] = { dma_fds[idx] };
+                    size_t calc_size = infos[idx].stride * infos[idx].height;
+                    int buf_size = (map_sizes[idx] > 0) ? (int)map_sizes[idx] : (int)calc_size;
+                    int data_ints[8] = {
+                        0x03141592, // magic: sPrivateHandleMagic for Android gralloc
+                        0,          // flags
+                        buf_size,   // size
+                        0,          // offset
+                        0,          // base (low 32)
+                        0,          // base (high 32)
+                        0,          // pid
+                        0           // reserved
+                    };
                     struct drm_evdi_get_buff_callabck cb = {
                         .poll_id = poll_cmd.poll_id,
-                        .version = 1,
+                        .version = 12, // sizeof(native_handle_t) = 12 bytes
                         .numFds = 1,
-                        .numInts = 0,
+                        .numInts = 8,
                         .fd_ints = fd_ints,
-                        .data_ints = NULL
+                        .data_ints = data_ints
                     };
                     drm_ioctl(evdi_fd, DRM_IOCTL_EVDI_GET_BUFF_CALLBACK, &cb);
+                } else {
+                    printf("[evdi-bridge] Warning: get_buf invalid idx=%d\n", idx);
                 }
             } else if (poll_cmd.event == destroy_buf) {
+                printf("[evdi-bridge] Event: destroy_buf (poll_id=%d)\n", poll_cmd.poll_id);
                 struct drm_evdi_destroy_buff_callback cb = { .poll_id = poll_cmd.poll_id };
                 drm_ioctl(evdi_fd, DRM_IOCTL_EVDI_DESTROY_BUFF_CALLBACK, &cb);
             } else if (poll_cmd.event == swap_to) {
+                int swap_id = -1;
+                memcpy(&swap_id, poll_payload, sizeof(swap_id));
+                printf("[evdi-bridge] Event: swap_to (bo_id=%d) -> signaling fence_fd=%d\n", swap_id, fence_fd);
                 if (fence_fd >= 0) {
                     char dummy = 1;
                     struct iovec iov = { .iov_base = &dummy, .iov_len = 1 };
