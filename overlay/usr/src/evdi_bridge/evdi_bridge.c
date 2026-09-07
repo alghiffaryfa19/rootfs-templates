@@ -1,3 +1,4 @@
+#define _GNU_SOURCE
 #include <stdio.h>
 #include <stdlib.h>
 #include <unistd.h>
@@ -310,15 +311,34 @@ int main() {
 
         uint32_t *mapped_bufs[MAX_BUFS] = {NULL};
         size_t map_sizes[MAX_BUFS] = {0};
+        int meta_fds[MAX_BUFS];
+        for (int i = 0; i < MAX_BUFS; i++) meta_fds[i] = -1;
+
         for (int i = 0; i < dma_fds_received; i++) {
             size_t calc_size = infos[i].stride * infos[i].height;
             off_t real_size = lseek(dma_fds[i], 0, SEEK_END);
+            lseek(dma_fds[i], 0, SEEK_SET);
             map_sizes[i] = (real_size > 0) ? (size_t)real_size : calc_size;
 
             mapped_bufs[i] = mmap(NULL, map_sizes[i], PROT_READ | PROT_WRITE, MAP_SHARED, dma_fds[i], 0);
             if (mapped_bufs[i] == MAP_FAILED) {
                 perror("[evdi-bridge] mmap DMA-BUF warning");
                 mapped_bufs[i] = NULL;
+            }
+
+            // Create metadata fd required by Qualcomm Gralloc (SM8550)
+            meta_fds[i] = memfd_create("gralloc_meta", MFD_CLOEXEC);
+            if (meta_fds[i] >= 0) {
+                if (ftruncate(meta_fds[i], 65536) < 0) {
+                    perror("[evdi-bridge] ftruncate meta_fd failed");
+                }
+                void *p = mmap(NULL, 65536, PROT_READ | PROT_WRITE, MAP_SHARED, meta_fds[i], 0);
+                if (p != MAP_FAILED) {
+                    memset(p, 0, 65536);
+                    munmap(p, 65536);
+                }
+            } else {
+                perror("[evdi-bridge] memfd_create failed");
             }
         }
 
@@ -337,7 +357,8 @@ int main() {
             printf("[evdi-bridge] FATAL: Failed to open EVDI device.\n");
             for (int i = 0; i < dma_fds_received; i++) {
                 if (mapped_bufs[i]) munmap(mapped_bufs[i], map_sizes[i]);
-                close(dma_fds[i]);
+                if (dma_fds[i] >= 0) close(dma_fds[i]);
+                if (meta_fds[i] >= 0) close(meta_fds[i]);
             }
             munmap((void *)shm_ptr, sizeof(uint32_t));
             shm_ptr = NULL;
@@ -413,28 +434,54 @@ int main() {
                 int idx = (requested_id > 0) ? (requested_id - 1) : requested_id;
                 printf("[evdi-bridge] Event: get_buf (requested bo_id=%d -> dmabuf idx=%d)\n", requested_id, idx);
                 if (idx >= 0 && idx < dma_fds_received) {
-                    int fd_ints[1] = { dma_fds[idx] };
+                    int fd_ints[2] = { dma_fds[idx], meta_fds[idx] };
                     size_t calc_size = infos[idx].stride * infos[idx].height;
                     int buf_size = (map_sizes[idx] > 0) ? (int)map_sizes[idx] : (int)calc_size;
-                    int data_ints[8] = {
-                        0x03141592, // magic: sPrivateHandleMagic for Android gralloc
-                        0,          // flags
-                        buf_size,   // size
-                        0,          // offset
-                        0,          // base (low 32)
-                        0,          // base (high 32)
-                        0,          // pid
-                        0           // reserved
+                    int aligned_w = (infos[idx].stride > 0) ? (int)(infos[idx].stride / 4) : (int)infos[idx].width;
+                    int aligned_h = (int)infos[idx].height;
+                    int unaligned_w = (int)infos[idx].width;
+                    int unaligned_h = (int)infos[idx].height;
+
+                    int data_ints[24] = {
+                        0x676d736d,  // [0] magic: 'msmg'
+                        0,           // [1] flags
+                        aligned_w,   // [2] width (aligned)
+                        aligned_h,   // [3] height (aligned)
+                        unaligned_w, // [4] unaligned_width
+                        unaligned_h, // [5] unaligned_height
+                        1,           // [6] format: HAL_PIXEL_FORMAT_RGBA_8888
+                        1,           // [7] layer_count
+                        0,           // [8] reserved
+                        idx + 1,     // [9] id (low 32)
+                        0,           // [10] id (high 32)
+                        0x00000b00,  // [11] usage (low 32): TEXTURE | RENDER | COMPOSER
+                        0,           // [12] usage (high 32)
+                        buf_size,    // [13] size
+                        0,           // [14] offset
+                        0,           // [15] offset_metadata
+                        0,           // [16] base (low 32)
+                        0,           // [17] base (high 32)
+                        0,           // [18] base_metadata (low 32)
+                        0,           // [19] base_metadata (high 32)
+                        0,           // [20] pixel_format_modifier (low 32)
+                        0,           // [21] pixel_format_modifier (high 32)
+                        0,           // [22] reserved_size
+                        0            // [23] custom_content_md_reserved_size
                     };
                     struct drm_evdi_get_buff_callabck cb = {
                         .poll_id = poll_cmd.poll_id,
                         .version = 12, // sizeof(native_handle_t) = 12 bytes
-                        .numFds = 1,
-                        .numInts = 8,
+                        .numFds = 2,
+                        .numInts = 24,
                         .fd_ints = fd_ints,
                         .data_ints = data_ints
                     };
-                    drm_ioctl(evdi_fd, DRM_IOCTL_EVDI_GET_BUFF_CALLBACK, &cb);
+                    if (drm_ioctl(evdi_fd, DRM_IOCTL_EVDI_GET_BUFF_CALLBACK, &cb) < 0) {
+                        perror("[evdi-bridge] GET_BUFF_CALLBACK failed");
+                    } else {
+                        printf("[evdi-bridge] Successfully sent Qualcomm private_handle_t (fd=%d, meta_fd=%d, size=%d)\n",
+                               fd_ints[0], fd_ints[1], buf_size);
+                    }
                 } else {
                     printf("[evdi-bridge] Warning: get_buf invalid idx=%d\n", idx);
                 }
@@ -473,7 +520,8 @@ int main() {
         // Cleanup resources
         for (int i = 0; i < dma_fds_received; i++) {
             if (mapped_bufs[i]) munmap(mapped_bufs[i], map_sizes[i]);
-            close(dma_fds[i]);
+            if (dma_fds[i] >= 0) close(dma_fds[i]);
+            if (meta_fds[i] >= 0) close(meta_fds[i]);
         }
         if (shm_ptr) {
             munmap((void *)shm_ptr, sizeof(uint32_t));
