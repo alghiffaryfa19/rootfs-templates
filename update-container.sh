@@ -5,12 +5,12 @@ echo "Updating container for Lindroid create-disp..."
 
 # Install build dependencies
 apt-get update
-apt-get install -y cmake g++ pkg-config libdrm-dev libsystemd-dev git
+apt-get install -y cmake g++ pkg-config libdrm-dev libsystemd-dev
 
 # Clone create-disp source
 echo "Cloning create-disp..."
 rm -rf /tmp/create-disp
-git clone https://github.com/Linux-on-droid/create-disp /tmp/create-disp
+git clone https://github.com/alghiffaryfa19/create-disp.git /tmp/create-disp
 
 cd /tmp/create-disp
 
