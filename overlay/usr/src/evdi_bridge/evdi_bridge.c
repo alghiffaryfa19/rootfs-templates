@@ -389,23 +389,29 @@ int main() {
         uint32_t disp_w = (sinfo_msg.info.width > 0) ? sinfo_msg.info.width : infos[0].width;
         uint32_t disp_h = (sinfo_msg.info.height > 0) ? sinfo_msg.info.height : infos[0].height;
         uint32_t disp_hz = (sinfo_msg.info.refresh > 0) ? (sinfo_msg.info.refresh / 1000) : 60;
-        if (disp_hz == 0) disp_hz = 60;
-
+        //if (disp_hz == 0) disp_hz = 60;
+        if (disp_hz > 60) disp_hz = 60;
+        
         // Tambahkan ini SEBELUM struct drm_evdi_connect cmd
         struct drm_evdi_connect dis = {0};
         drm_ioctl(evdi_fd, DRM_IOCTL_EVDI_CONNECT, &dis);
         usleep(50000);
+
+        uint32_t aligned_w = (infos[0].stride > 0) ? (infos[0].stride / 4) : disp_w;
         
         struct drm_evdi_connect cmd = {
             .connected = 1,
             .dev_index = 0,
-            .width = disp_w,
+            .width = aligned_w,
             .height = disp_h,
             .refresh_rate = disp_hz,
             .display_id = 0
         };
         if (drm_ioctl(evdi_fd, DRM_IOCTL_EVDI_CONNECT, &cmd) < 0) {
             perror("[evdi-bridge] EVDI_CONNECT failed");
+            close(evdi_fd);
+            g_evdi_fd = -1;
+            goto cleanup;  // ← tambahkan ini
         }
         printf("[evdi-bridge] Connected virtual display %ux%u@%uHz\n", disp_w, disp_h, disp_hz);
 
@@ -463,6 +469,7 @@ int main() {
                     size_t calc_size = infos[idx].stride * infos[idx].height;
                     int buf_size = (map_sizes[idx] > 0) ? (int)map_sizes[idx] : (int)calc_size;
                     int aligned_w = (infos[idx].stride > 0) ? (int)(infos[idx].stride / 4) : (int)infos[idx].width;
+                    uint32_t aligned_w = infos[0].stride / 4; // = 3328
                     int aligned_h = (int)infos[idx].height;
                     int unaligned_w = (int)infos[idx].width;
                     int unaligned_h = (int)infos[idx].height;
