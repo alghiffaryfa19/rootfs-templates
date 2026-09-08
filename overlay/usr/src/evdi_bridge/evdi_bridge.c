@@ -391,6 +391,11 @@ int main() {
         uint32_t disp_hz = (sinfo_msg.info.refresh > 0) ? (sinfo_msg.info.refresh / 1000) : 60;
         if (disp_hz == 0) disp_hz = 60;
 
+        // Tambahkan ini SEBELUM struct drm_evdi_connect cmd
+        struct drm_evdi_connect dis = {0};
+        drm_ioctl(evdi_fd, DRM_IOCTL_EVDI_CONNECT, &dis);
+        usleep(50000);
+        
         struct drm_evdi_connect cmd = {
             .connected = 1,
             .dev_index = 0,
