@@ -411,6 +411,8 @@ int main() {
             g_evdi_fd = -1;
             goto cleanup;
         }
+
+        drmDropMaster(evdi_fd);
         printf("[evdi-bridge] Connected virtual display %ux%u (aligned %u)@%uHz\n",
                disp_w, disp_h, aligned_w, disp_hz);
 
