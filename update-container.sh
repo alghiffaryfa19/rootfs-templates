@@ -9,7 +9,7 @@ systemctl disable create-disp.service || true
 
 # Compile evdi-bridge (must happen BEFORE starting the service)
 echo "Compiling evdi-bridge..."
-gcc -o /usr/bin/evdi_bridge overlay/usr/src/evdi_bridge/evdi_bridge.c -ldrm
+gcc -o /usr/bin/evdi_bridge overlay/usr/src/evdi_bridge/evdi_bridge.c -I/usr/include/libdrm -ldrm
 
 systemctl enable evdi-bridge.service
 systemctl restart evdi-bridge.service
