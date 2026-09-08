@@ -91,22 +91,43 @@ static int drm_ioctl(int fd, unsigned long req, void *arg) {
 
 /* Direct EVDI device open — no libevdi dependency needed.
  * Scan /dev/dri/card0..cardN, try the EVDI_POLL ioctl to detect EVDI devices. */
+// static int evdi_open_direct(int index) {
+//     char path[64];
+//     snprintf(path, sizeof(path), "/dev/dri/card%d", index);
+//     int fd = open(path, O_RDWR);
+//     if (fd < 0) return -1;
+
+//     /* Probe: a real EVDI device accepts EVDI_POLL (returns 0 with event=none).
+//      * Non-EVDI DRM devices return -ENOTTY or -EINVAL. */
+//     struct drm_evdi_poll probe = {};
+//     uint8_t probe_data[32] = {0};
+//     probe.data = probe_data;
+//     if (ioctl(fd, DRM_IOCTL_EVDI_POLL, &probe) < 0 && errno == ENOTTY) {
+//         close(fd);
+//         return -1;
+//     }
+//     return fd;
+// }
+
 static int evdi_open_direct(int index) {
+    // Cek driver via sysfs dulu — hindari buka device non-EVDI
+    char uevent_path[128];
+    snprintf(uevent_path, sizeof(uevent_path),
+             "/sys/class/drm/card%d/device/uevent", index);
+    FILE *f = fopen(uevent_path, "r");
+    if (!f) return -1;
+
+    char line[256];
+    int is_evdi = 0;
+    while (fgets(line, sizeof(line), f)) {
+        if (strstr(line, "DRIVER=evdi")) { is_evdi = 1; break; }
+    }
+    fclose(f);
+    if (!is_evdi) return -1;
+
     char path[64];
     snprintf(path, sizeof(path), "/dev/dri/card%d", index);
-    int fd = open(path, O_RDWR);
-    if (fd < 0) return -1;
-
-    /* Probe: a real EVDI device accepts EVDI_POLL (returns 0 with event=none).
-     * Non-EVDI DRM devices return -ENOTTY or -EINVAL. */
-    struct drm_evdi_poll probe = {};
-    uint8_t probe_data[32] = {0};
-    probe.data = probe_data;
-    if (ioctl(fd, DRM_IOCTL_EVDI_POLL, &probe) < 0 && errno == ENOTTY) {
-        close(fd);
-        return -1;
-    }
-    return fd;
+    return open(path, O_RDWR);
 }
 
 #define CTRL_MSG_CONSUMER_HELLO  1
@@ -331,9 +352,10 @@ int main() {
 
         for (int i = 0; i < dma_fds_received; i++) {
             size_t calc_size = infos[i].stride * infos[i].height;
-            off_t real_size = lseek(dma_fds[i], 0, SEEK_END);
-            lseek(dma_fds[i], 0, SEEK_SET);
-            map_sizes[i] = (real_size > 0) ? (size_t)real_size : calc_size;
+            // off_t real_size = lseek(dma_fds[i], 0, SEEK_END);
+            // lseek(dma_fds[i], 0, SEEK_SET);
+            // map_sizes[i] = (real_size > 0) ? (size_t)real_size : calc_size;
+            map_sizes[i] = calc_size;
 
             mapped_bufs[i] = mmap(NULL, map_sizes[i], PROT_READ | PROT_WRITE, MAP_SHARED, dma_fds[i], 0);
             if (mapped_bufs[i] == MAP_FAILED) {
