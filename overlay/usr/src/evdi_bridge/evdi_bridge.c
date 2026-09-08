@@ -15,7 +15,6 @@
 #include <pthread.h>
 #include <xf86drm.h>
 #include <xf86drmMode.h>
-#include <evdi_lib.h>
 #include <sys/ioctl.h>
 #include <errno.h>
 
@@ -88,6 +87,26 @@ static int drm_ioctl(int fd, unsigned long req, void *arg) {
         ret = ioctl(fd, req, arg);
     } while (ret == -1 && (errno == EINTR || errno == EAGAIN));
     return ret;
+}
+
+/* Direct EVDI device open — no libevdi dependency needed.
+ * Scan /dev/dri/card0..cardN, try the EVDI_POLL ioctl to detect EVDI devices. */
+static int evdi_open_direct(int index) {
+    char path[64];
+    snprintf(path, sizeof(path), "/dev/dri/card%d", index);
+    int fd = open(path, O_RDWR);
+    if (fd < 0) return -1;
+
+    /* Probe: a real EVDI device accepts EVDI_POLL (returns 0 with event=none).
+     * Non-EVDI DRM devices return -ENOTTY or -EINVAL. */
+    struct drm_evdi_poll probe = {};
+    uint8_t probe_data[32] = {0};
+    probe.data = probe_data;
+    if (ioctl(fd, DRM_IOCTL_EVDI_POLL, &probe) < 0 && errno == ENOTTY) {
+        close(fd);
+        return -1;
+    }
+    return fd;
 }
 
 #define CTRL_MSG_CONSUMER_HELLO  1
@@ -338,18 +357,18 @@ int main() {
             }
         }
 
-        // 6. Open EVDI device
-        evdi_handle evdi = EVDI_INVALID_HANDLE;
+        // 6. Open EVDI device (direct, no libevdi)
+        int evdi_fd = -1;
         int evdi_idx = -1;
         for (int i = 0; i < 10; i++) {
-            evdi = evdi_open(i);
-            if (evdi != EVDI_INVALID_HANDLE) {
+            evdi_fd = evdi_open_direct(i);
+            if (evdi_fd >= 0) {
                 evdi_idx = i;
                 break;
             }
         }
 
-        if (evdi == EVDI_INVALID_HANDLE) {
+        if (evdi_fd < 0) {
             printf("[evdi-bridge] FATAL: Failed to open EVDI device.\n");
             for (int i = 0; i < dma_fds_received; i++) {
                 if (mapped_bufs[i]) munmap(mapped_bufs[i], map_sizes[i]);
@@ -363,9 +382,8 @@ int main() {
             if (audio_fd >= 0) close(audio_fd);
             continue;
         }
-        printf("[evdi-bridge] EVDI device %d opened successfully!\n", evdi_idx);
+        printf("[evdi-bridge] EVDI device %d opened successfully (fd=%d)!\n", evdi_idx, evdi_fd);
 
-        int evdi_fd = evdi_get_event_ready(evdi);
         g_evdi_fd = evdi_fd;
 
         uint32_t disp_w = (sinfo_msg.info.width > 0) ? sinfo_msg.info.width : infos[0].width;
@@ -515,7 +533,7 @@ int main() {
         if (g_evdi_fd >= 0) {
             struct drm_evdi_connect dis = {0};
             drm_ioctl(evdi_fd, DRM_IOCTL_EVDI_CONNECT, &dis);
-            evdi_close(evdi);
+            close(evdi_fd);
             g_evdi_fd = -1;
         }
 
