@@ -468,8 +468,8 @@ int main() {
                     int fd_ints[2] = { dma_fds[idx], meta_fds[idx] };
                     size_t calc_size = infos[idx].stride * infos[idx].height;
                     int buf_size = (map_sizes[idx] > 0) ? (int)map_sizes[idx] : (int)calc_size;
+                    int aligned_w = (infos[idx].stride > 0) ? (int)(infos[idx].stride / 4) : (i
                     int aligned_w = (infos[idx].stride > 0) ? (int)(infos[idx].stride / 4) : (int)infos[idx].width;
-                    uint32_t aligned_w = infos[0].stride / 4; // = 3328
                     int aligned_h = (int)infos[idx].height;
                     int unaligned_w = (int)infos[idx].width;
                     int unaligned_h = (int)infos[idx].height;
@@ -541,7 +541,7 @@ int main() {
 
         g_connected = 0;
         pthread_join(watchdog_th, NULL);
-
+cleanup:
         if (g_evdi_fd >= 0) {
             struct drm_evdi_connect dis = {0};
             drm_ioctl(evdi_fd, DRM_IOCTL_EVDI_CONNECT, &dis);
