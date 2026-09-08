@@ -414,6 +414,11 @@ int main() {
         printf("[evdi-bridge] Connected virtual display %ux%u (aligned %u)@%uHz\n",
                disp_w, disp_h, aligned_w, disp_hz);
 
+        // Drop DRM master so kwin can open the device
+        if (drmDropMaster(evdi_fd) < 0) {
+            perror("[evdi-bridge] drmDropMaster warning");
+        }
+
         // Wait for connector to register, then restart SDDM
         printf("[evdi-bridge] Waiting for EVDI connector to become active...\n");
         
