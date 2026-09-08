@@ -6,12 +6,13 @@ echo "Updating container for evdi-bridge and SDDM Wayland..."
 # Re-enable evdi-bridge, disable create-disp
 systemctl stop create-disp.service || true
 systemctl disable create-disp.service || true
-systemctl enable evdi-bridge.service
-systemctl start evdi-bridge.service
 
-# Compile evdi-bridge
+# Compile evdi-bridge (must happen BEFORE starting the service)
 echo "Compiling evdi-bridge..."
-gcc -o /usr/bin/evdi-bridge /usr/src/evdi_bridge/evdi_bridge.c -ldrm
+gcc -o /usr/bin/evdi_bridge /usr/src/evdi_bridge/evdi_bridge.c -ldrm
+
+systemctl enable evdi-bridge.service
+systemctl restart evdi-bridge.service
 
 # Mask tmp.mount so Android socket isn't hidden
 echo "Masking tmp.mount..."

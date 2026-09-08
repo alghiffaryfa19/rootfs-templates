@@ -386,9 +386,15 @@ int main() {
         }
         printf("[evdi-bridge] Connected virtual display %ux%u@%uHz\n", disp_w, disp_h, disp_hz);
 
-        // Notify udev and display manager that virtual display is active
-        int sys_ret = system("udevadm trigger --subsystem-match=drm 2>/dev/null; systemctl restart sddm 2>/dev/null &");
+        // Wait for connector to register, then restart SDDM
+        printf("[evdi-bridge] Waiting for EVDI connector to become active...\n");
+        usleep(500000); // 500ms for udev to process
+        int sys_ret = system("udevadm trigger --subsystem-match=drm 2>/dev/null");
         (void)sys_ret;
+        usleep(500000);
+        sys_ret = system("systemctl restart sddm 2>/dev/null");
+        (void)sys_ret;
+        printf("[evdi-bridge] SDDM restarted.\n");
 
         // 7. Start watchdog thread to monitor client socket for disconnect
         g_connected = 1;
